@@ -43,6 +43,40 @@ func TestToSimplified(t *testing.T) {
 	}
 }
 
+func TestNormalize(t *testing.T) {
+	cases := []struct {
+		title, lang string
+		target      Script
+		want        string
+	}{
+		{"无法成为主角的我们 第一卷", "zh", Traditional, "無法成為主角的我們 第一卷"},
+		{"來購買成人用品的優等生 第一卷 上", "zh-TW", Traditional, "來購買成人用品的優等生 第一卷 上"},
+		{"來購買成人用品的優等生 第一卷 上", "zh-TW", Simplified, "来购买成人用品的优等生 第一卷 上"},
+		{"无法成为主角的我们", "zh", Keep, "无法成为主角的我们"},
+		// Japanese titles share kanji with Chinese but must never be converted.
+		{"扉の魔術師の召喚契約", "ja", Traditional, "扉の魔術師の召喚契約"},
+		{"小説", "ja", Simplified, "小説"},
+		{"Whistler", "en", Traditional, "Whistler"},
+		{"无法成为主角的我们", "", Traditional, "无法成为主角的我们"},
+	}
+	for _, c := range cases {
+		if got := Normalize(c.title, c.lang, c.target); got != c.want {
+			t.Errorf("Normalize(%q,%q,%s)=%q want %q", c.title, c.lang, c.target, got, c.want)
+		}
+	}
+}
+
+func TestParseScript(t *testing.T) {
+	for in, want := range map[string]Script{"traditional": Traditional, " Simplified ": Simplified, "KEEP": Keep} {
+		if got, ok := ParseScript(in); !ok || got != want {
+			t.Errorf("ParseScript(%q)=%q,%v", in, got, ok)
+		}
+	}
+	if _, ok := ParseScript("hant"); ok {
+		t.Error("ParseScript(hant) should fail")
+	}
+}
+
 func TestTags(t *testing.T) {
 	for tag, want := range map[string]bool{"zh-TW": true, "zh_hk": true, "zh-Hant": true, "zh-Hant-TW": true, "zh": false, "zh-CN": false, "ja": false, "": false} {
 		if got := IsTraditional(tag); got != want {

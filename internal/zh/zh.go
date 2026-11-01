@@ -54,6 +54,42 @@ func ToTraditional(s, tag string) (string, bool) {
 	return convert(cfg, s)
 }
 
+// Script is the target script for Chinese titles.
+type Script string
+
+const (
+	Traditional Script = "traditional"
+	Simplified  Script = "simplified"
+	Keep        Script = "keep" // leave titles as written
+)
+
+// ParseScript validates a user-supplied script name.
+func ParseScript(s string) (Script, bool) {
+	switch v := Script(strings.ToLower(strings.TrimSpace(s))); v {
+	case Traditional, Simplified, Keep:
+		return v, true
+	}
+	return "", false
+}
+
+// Normalize converts title to the target script when lang is Chinese.
+// Non-Chinese titles, Keep, and converter failures return title unchanged.
+func Normalize(title, lang string, target Script) string {
+	if !IsChinese(lang) {
+		return title
+	}
+	var out string
+	switch target {
+	case Traditional:
+		out, _ = ToTraditional(title, lang)
+	case Simplified:
+		out, _ = ToSimplified(title)
+	default:
+		return title
+	}
+	return out
+}
+
 // IsChinese reports whether tag's primary language is Chinese.
 func IsChinese(tag string) bool { return Base(tag) == "zh" }
 

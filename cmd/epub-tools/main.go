@@ -12,12 +12,13 @@ import (
 	"github.com/gkwang/epub-tools/internal/epub"
 	"github.com/gkwang/epub-tools/internal/lookup"
 	"github.com/gkwang/epub-tools/internal/rename"
+	"github.com/gkwang/epub-tools/internal/zh"
 )
 
 const usage = `epub-tools - organize an epub library
 
 Usage:
-  epub-tools rename [--apply] [--recursive] [--lookup] <dir>
+  epub-tools rename [--apply] [--recursive] [--lookup] [--chinese traditional|simplified|keep] <dir>
 
 Commands:
   rename    rename each epub to "<title>.epub" (preview unless --apply)
@@ -52,8 +53,9 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 	apply := fs.Bool("apply", false, "perform the renames (default: preview only)")
 	recursive := fs.Bool("recursive", false, "include subdirectories")
 	useLookup := fs.Bool("lookup", false, "look up canonical titles online (network)")
+	chinese := fs.String("chinese", string(zh.Traditional), "script for Chinese titles: traditional, simplified, or keep")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: epub-tools rename [--apply] [--recursive] [--lookup] <dir>")
+		fmt.Fprintln(stderr, "usage: epub-tools rename [--apply] [--recursive] [--lookup] [--chinese traditional|simplified|keep] <dir>")
 		fs.PrintDefaults()
 	}
 	// Allow flags after the directory too.
@@ -77,6 +79,11 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	dir := pos[0]
+	script, ok := zh.ParseScript(*chinese)
+	if !ok {
+		fmt.Fprintf(stderr, "invalid --chinese %q: want traditional, simplified, or keep\n", *chinese)
+		return 2
+	}
 
 	files, err := rename.Find(dir, *recursive)
 	if err != nil {
@@ -101,7 +108,7 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 			if md.TitleSource == epub.SourceNCX || md.TitleSource == epub.SourceNav {
 				note = "title from " + string(md.TitleSource)
 			}
-			return md.Title, note, nil
+			return zh.Normalize(md.Title, md.Lang, script), note, nil
 		}
 		res := norm.Normalize(context.Background(), md)
 		if res.Warn != "" {
@@ -115,7 +122,7 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 		if title == "" {
 			title = md.Title
 		}
-		return title, note, nil
+		return zh.Normalize(title, md.Lang, script), note, nil
 	}
 
 	actions := rename.Plan(files, resolve)
