@@ -23,11 +23,14 @@ Usage:
 
 Commands:
   rename    rename each epub to "<title>.epub" (preview unless --apply)
+  version   print the version
 
 Run "epub-tools rename -h" for flags.
 `
 
 func main() {
+	v, _, _ := buildInfo()
+	lookup.UserAgent = "epub-tools/" + v + " (https://github.com/gkwang/epub-tools)"
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
@@ -39,6 +42,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "rename":
 		return runRename(args[1:], stdout, stderr)
+	case "version", "-v", "--version":
+		printVersion(stdout)
+		return 0
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0

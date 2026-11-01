@@ -10,8 +10,11 @@ import (
 	"time"
 )
 
+// UserAgent identifies epub-tools to catalog APIs (Bangumi requires one).
+// The CLI sets it to include the release version before any lookup.
+var UserAgent = "epub-tools/dev (https://github.com/gkwang/epub-tools)"
+
 const (
-	userAgent      = "epub-tools/0.1 (https://github.com/gkwang/epub-tools)"
 	requestTimeout = 10 * time.Second
 	maxBody        = 4 << 20
 )
@@ -51,7 +54,7 @@ func defaultClient() *http.Client { return &http.Client{Timeout: requestTimeout}
 
 // doJSON sends req (adding the User-Agent) and decodes a 2xx JSON body into v.
 func doJSON(hc *http.Client, req *http.Request, v any) error {
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept", "application/json")
 	resp, err := hc.Do(req)
 	if err != nil {

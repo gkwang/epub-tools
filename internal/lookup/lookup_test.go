@@ -41,7 +41,7 @@ func (f *fixtures) normalizerOpts(t *testing.T, opts Options) Normalizer {
 		}
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			f.hits[i].Add(1)
-			if r.Header.Get("User-Agent") != userAgent {
+			if r.Header.Get("User-Agent") != UserAgent {
 				t.Errorf("bad User-Agent %q", r.Header.Get("User-Agent"))
 			}
 			h(w, r)
