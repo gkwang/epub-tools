@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/gkwang/epub-tools/internal/epub"
 	"github.com/gkwang/epub-tools/internal/lookup"
@@ -95,6 +96,11 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 	if *useLookup {
 		norm = lookup.New(lookup.Options{PreferTaiwan: script == zh.Traditional})
 	}
+	// Books whose title came from a catalog (not just a script change) get
+	// the new title written into their metadata, keeping the old one.
+	type metaUpdate struct{ title, old, lang string }
+	metaUpdates := map[string]metaUpdate{}
+
 	resolve := func(path string) (string, string, error) {
 		md, err := epub.Read(path)
 		if err != nil {
@@ -125,7 +131,11 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 		if title == "" {
 			title = md.Title
 		}
-		return zh.Normalize(title, md.Lang, script), note, nil
+		title = zh.Normalize(title, md.Lang, script)
+		if note != "embedded" && title != zh.Normalize(md.Title, md.Lang, script) {
+			metaUpdates[filepath.Clean(path)] = metaUpdate{title, md.Title, md.Lang}
+		}
+		return title, note, nil
 	}
 
 	actions := rename.Plan(files, resolve)
@@ -133,13 +143,14 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 		actions = rename.Apply(actions)
 	}
 
-	var changed, unchanged, failed int
+	var changed, unchanged, failed, metaChanged int
 	for _, a := range actions {
 		old := a.Path()
 		switch {
 		case a.Err != nil:
 			failed++
 			fmt.Fprintf(stdout, "error: %s: %v\n", old, a.Err)
+			continue
 		case a.Old == a.New:
 			unchanged++
 			fmt.Fprintf(stdout, "unchanged: %s\n", old)
@@ -151,12 +162,39 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 			}
 			fmt.Fprintln(stdout, line)
 		}
+
+		mu, ok := metaUpdates[filepath.Clean(old)]
+		if !ok {
+			continue
+		}
+		if !*apply {
+			metaChanged++
+			fmt.Fprintf(stdout, "  would set title metadata to %q (keeping %q as alternate)\n", mu.title, mu.old)
+			continue
+		}
+		did, err := epub.SetTitle(filepath.Join(a.Dir, a.New), mu.title, mu.old, mu.lang)
+		switch {
+		case err != nil:
+			failed++
+			fmt.Fprintf(stdout, "error: %s: title metadata not updated: %v\n", filepath.Join(a.Dir, a.New), err)
+		case did:
+			metaChanged++
+			fmt.Fprintf(stdout, "  set title metadata to %q (kept %q as alternate)\n", mu.title, mu.old)
+		}
 	}
 	verb := "would rename"
 	if *apply {
 		verb = "renamed"
 	}
-	fmt.Fprintf(stdout, "%s %d, unchanged %d, failed %d\n", verb, changed, unchanged, failed)
+	fmt.Fprintf(stdout, "%s %d, unchanged %d, failed %d", verb, changed, unchanged, failed)
+	if metaChanged > 0 {
+		if *apply {
+			fmt.Fprintf(stdout, ", metadata updated %d", metaChanged)
+		} else {
+			fmt.Fprintf(stdout, ", would update metadata %d", metaChanged)
+		}
+	}
+	fmt.Fprintln(stdout)
 	if !*apply && changed > 0 {
 		fmt.Fprintln(stdout, "(preview only; use --apply to rename)")
 	}
