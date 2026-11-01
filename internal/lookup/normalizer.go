@@ -8,16 +8,24 @@ import (
 	"github.com/gkwang/epub-tools/internal/epub"
 )
 
+// Options configures a Normalizer.
+type Options struct {
+	// PreferTaiwan makes Chinese (zh) books prefer an accepted Taiwan-edition
+	// catalog match over any other accepted match, even from a later source.
+	PreferTaiwan bool
+}
+
 type normalizer struct {
+	opts    Options
 	sources []Source
 }
 
 // New returns the production Normalizer: Bangumi (zh/ja only), Google Books
 // (optional GOOGLE_BOOKS_API_KEY) and Open Library, in that order, with a
 // 10 second HTTP timeout and at most one Open Library request per second.
-func New() Normalizer {
+func New(opts Options) Normalizer {
 	hc := defaultClient()
-	return NewWithSources(
+	return NewWithSources(opts,
 		NewBangumi("", hc),
 		NewGoogleBooks("", googleAPIKeyFromEnv(), hc),
 		NewOpenLibrary("", hc, time.Second),
@@ -26,7 +34,9 @@ func New() Normalizer {
 
 // NewWithSources returns a Normalizer that consults sources in order. Tests
 // use it with sources pointed at httptest servers.
-func NewWithSources(sources ...Source) Normalizer { return &normalizer{sources: sources} }
+func NewWithSources(opts Options, sources ...Source) Normalizer {
+	return &normalizer{opts: opts, sources: sources}
+}
 
 func embedded(md epub.Metadata, warn string) Result {
 	return Result{Title: md.Title, Source: "embedded", Warn: warn}
@@ -51,6 +61,8 @@ func (n *normalizer) Normalize(ctx context.Context, md epub.Metadata) (res Resul
 	base, vol := splitVolume(md.Title)
 	q := Query{Title: base, Authors: md.Authors, ISBN: md.ISBN, Lang: md.Lang}
 
+	prefer := n.opts.PreferTaiwan && baseLang(md.Lang) == "zh"
+	var fallback *Result
 	var warns []string
 	for _, src := range n.sources {
 		if ctx.Err() != nil {
@@ -63,10 +75,24 @@ func (n *normalizer) Normalize(ctx context.Context, md epub.Metadata) (res Resul
 			continue
 		}
 		for _, c := range cands {
-			if title, ok := accept(md, base, vol, c, trad); ok {
-				return Result{Title: title, Source: src.Name()}
+			title, ok := accept(md, base, vol, c, trad)
+			if !ok {
+				continue
+			}
+			r := Result{Title: title, Source: src.Name()}
+			if c.Taiwan && baseLang(md.Lang) == "zh" {
+				r.Edition = "taiwan"
+			}
+			if !prefer || r.Edition == "taiwan" {
+				return r
+			}
+			if fallback == nil {
+				fallback = &r
 			}
 		}
+	}
+	if fallback != nil {
+		return *fallback
 	}
 	return embedded(md, strings.Join(warns, "; "))
 }
@@ -102,7 +128,15 @@ func accept(md epub.Metadata, base, vol string, c Candidate, trad bool) (string,
 
 	title := strings.TrimSpace(c.Title)
 	if baseLang(md.Lang) == "zh" {
-		if trad {
+		if c.Taiwan && trad {
+			// Taiwan titles are already Traditional; only convert if the
+			// text has no Traditional-only characters (i.e. came back Simplified).
+			if s, ok := toSimplified(title); ok && s == title {
+				if t, ok := toTraditional(title, md.Lang); ok {
+					title = t
+				}
+			}
+		} else if trad {
 			if t, ok := toTraditional(title, md.Lang); ok {
 				title = t
 			}

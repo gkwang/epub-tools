@@ -30,6 +30,11 @@ func status(code int) http.HandlerFunc {
 
 func (f *fixtures) normalizer(t *testing.T) Normalizer {
 	t.Helper()
+	return f.normalizerOpts(t, Options{})
+}
+
+func (f *fixtures) normalizerOpts(t *testing.T, opts Options) Normalizer {
+	t.Helper()
 	wrap := func(i int, h http.HandlerFunc) *httptest.Server {
 		if h == nil {
 			h = jsonH(`{}`)
@@ -45,7 +50,7 @@ func (f *fixtures) normalizer(t *testing.T) Normalizer {
 		return s
 	}
 	b, g, o := wrap(0, f.bangumi), wrap(1, f.google), wrap(2, f.ol)
-	return NewWithSources(NewBangumi(b.URL, nil), NewGoogleBooks(g.URL, "", nil), NewOpenLibrary(o.URL, nil, 0))
+	return NewWithSources(opts, NewBangumi(b.URL, nil), NewGoogleBooks(g.URL, "", nil), NewOpenLibrary(o.URL, nil, 0))
 }
 
 func total(f *fixtures) int32 { return f.hits[0].Load() + f.hits[1].Load() + f.hits[2].Load() }
@@ -281,5 +286,104 @@ func TestAuthorsOverlap(t *testing.T) {
 	}
 	if authorsOverlap([]string{"Patchett, Ann"}, []string{"John Smith"}) || authorsOverlap([]string{"川原礫"}, []string{"Reki Kawahara"}) {
 		t.Error("unexpected overlap")
+	}
+}
+
+func TestIsTaiwanEdition(t *testing.T) {
+	tests := []struct {
+		pub   string
+		isbns []string
+		want  bool
+	}{
+		{"", []string{"9789571052595"}, true},
+		{"", []string{"978-986-123-456-7"}, true},
+		{"", []string{"9786261234567"}, true},
+		{"", []string{"9571052590"}, true},
+		{"", []string{"986-123-456-X"}, true},
+		{"", []string{"9784088800001"}, false},
+		{"", []string{"9787020000000"}, false},
+		{"", []string{"9789881234567"}, false}, // Hong Kong
+		{"尖端出版", nil, true},
+		{"台灣東販", nil, true},
+		{"臺灣角川", nil, true},
+		{"某某台湾分公司", nil, true},
+		{"角川書店", nil, false},
+		{"KADOKAWA", nil, false},
+		{"人民文学出版社", nil, false},
+		{"芳文社、台灣東販", nil, true},
+		{"芳文社、台灣東販", []string{"9784832280000"}, false},
+		{"芳文社、台灣東販", []string{"9789863000000"}, true},
+		{"", nil, false},
+	}
+	for _, tc := range tests {
+		if got := IsTaiwanEdition(tc.pub, tc.isbns...); got != tc.want {
+			t.Errorf("IsTaiwanEdition(%q, %v) = %v, want %v", tc.pub, tc.isbns, got, tc.want)
+		}
+	}
+}
+
+const bangumiMainlandAndTW = `{"data":[
+{"id":1,"name":"来革命吧!覆盆子ja","name_cn":"来革命吧！覆盆子","infobox":[{"key":"出版社","value":"人民出版社"},{"key":"ISBN","value":"9787000000000"}]},
+{"id":425958,"name":"來革命吧！覆盆子","name_cn":"来革命吧！覆盆子","infobox":[{"key":"出版社","value":[{"v":"尖端出版"}]},{"key":"ISBN","value":"9789571052595"}]}
+]}`
+
+func TestBangumiPreferTaiwan(t *testing.T) {
+	md := epub.Metadata{Title: "來革命吧！覆盆子", Lang: "zh-TW"}
+	f := &fixtures{bangumi: jsonH(bangumiMainlandAndTW)}
+	got := f.normalizerOpts(t, Options{PreferTaiwan: true}).Normalize(context.Background(), md)
+	if got.Source != "bangumi" || got.Edition != "taiwan" || got.Title != "來革命吧！覆盆子" {
+		t.Fatalf("got %+v", got)
+	}
+	f = &fixtures{bangumi: jsonH(bangumiMainlandAndTW)}
+	got = f.normalizer(t).Normalize(context.Background(), md)
+	if got.Source != "bangumi" || got.Edition != "" || got.Title != "來革命吧！覆盆子" {
+		t.Fatalf("no preference: got %+v", got)
+	}
+}
+
+const googleTW = `{"items":[{"volumeInfo":{"title":"來革命吧！覆盆子","language":"zh-TW","publisher":"尖端","industryIdentifiers":[{"type":"ISBN_13","identifier":"9789571052595"}]}}]}`
+
+func TestGoogleTaiwanBeatsEarlierBangumiMainland(t *testing.T) {
+	mainland := `{"data":[{"name":"x","name_cn":"来革命吧！覆盆子","infobox":[{"key":"ISBN","value":"9787000000000"}]}]}`
+	md := epub.Metadata{Title: "來革命吧！覆盆子", Lang: "zh-TW"}
+	f := &fixtures{bangumi: jsonH(mainland), google: jsonH(googleTW)}
+	got := f.normalizerOpts(t, Options{PreferTaiwan: true}).Normalize(context.Background(), md)
+	if got.Source != "google" || got.Edition != "taiwan" || got.Title != "來革命吧！覆盆子" {
+		t.Fatalf("got %+v", got)
+	}
+	f = &fixtures{bangumi: jsonH(mainland), google: jsonH(googleTW)}
+	got = f.normalizer(t).Normalize(context.Background(), md)
+	if got.Source != "bangumi" || got.Edition != "" {
+		t.Fatalf("no preference: got %+v", got)
+	}
+	if f.hits[1].Load() != 0 {
+		t.Error("google should not be queried without preference")
+	}
+}
+
+func TestPreferTaiwanFallback(t *testing.T) {
+	mainland := `{"data":[{"name":"x","name_cn":"来革命吧！覆盆子","infobox":[{"key":"ISBN","value":"9787000000000"}]}]}`
+	hk := `{"items":[{"volumeInfo":{"title":"來革命吧！覆盆子","language":"zh-TW","publisher":"某港出版","industryIdentifiers":[{"type":"ISBN_13","identifier":"9789881234567"}]}}]}`
+	f := &fixtures{bangumi: jsonH(mainland), google: jsonH(hk)}
+	md := epub.Metadata{Title: "來革命吧！覆盆子", Lang: "zh-TW"}
+	got := f.normalizerOpts(t, Options{PreferTaiwan: true}).Normalize(context.Background(), md)
+	if got.Source != "bangumi" || got.Edition != "" || got.Title != "來革命吧！覆盆子" {
+		t.Fatalf("got %+v", got)
+	}
+	if f.hits[1].Load() == 0 {
+		t.Error("google should have been consulted")
+	}
+}
+
+func TestPreferTaiwanIgnoredForNonChinese(t *testing.T) {
+	g := `{"items":[{"volumeInfo":{"title":"Whistler","authors":["Ann Patchett"],"language":"en","publisher":"台灣東販"}},{"volumeInfo":{"title":"Whistler","authors":["Ann Patchett"],"language":"en"}}]}`
+	f := &fixtures{google: jsonH(g)}
+	md := epub.Metadata{Title: "Whistler", Lang: "en", Authors: []string{"Ann Patchett"}}
+	got := f.normalizerOpts(t, Options{PreferTaiwan: true}).Normalize(context.Background(), md)
+	if got.Source != "google" || got.Title != "Whistler" || got.Edition != "" {
+		t.Fatalf("got %+v", got)
+	}
+	if f.hits[2].Load() != 0 {
+		t.Error("open library must not be queried once google matched")
 	}
 }

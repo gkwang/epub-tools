@@ -29,7 +29,10 @@ type Candidate struct {
 	Title     string
 	Lang      string // ISO 639-1 (optionally with region); "" if unknown
 	Authors   []string
-	ISBNMatch bool // found by an exact ISBN query
+	ISBNMatch bool   // found by an exact ISBN query
+	ISBN      string // catalog ISBN, if reported
+	Publisher string // catalog publisher, if reported
+	Taiwan    bool   // entry is a Taiwan edition (see IsTaiwanEdition)
 }
 
 // Source is one online catalog. A source with nothing to say about the query

@@ -45,9 +45,14 @@ func (g *GoogleBooks) query(ctx context.Context, q string) ([]Candidate, error) 
 	var out struct {
 		Items []struct {
 			VolumeInfo struct {
-				Title    string   `json:"title"`
-				Authors  []string `json:"authors"`
-				Language string   `json:"language"`
+				Title     string   `json:"title"`
+				Authors   []string `json:"authors"`
+				Language  string   `json:"language"`
+				Publisher string   `json:"publisher"`
+				IDs       []struct {
+					Type       string `json:"type"`
+					Identifier string `json:"identifier"`
+				} `json:"industryIdentifiers"`
 			} `json:"volumeInfo"`
 		} `json:"items"`
 	}
@@ -60,7 +65,22 @@ func (g *GoogleBooks) query(ctx context.Context, q string) ([]Candidate, error) 
 		if strings.TrimSpace(vi.Title) == "" {
 			continue
 		}
-		cands = append(cands, Candidate{Title: vi.Title, Lang: vi.Language, Authors: vi.Authors})
+		var isbns []string
+		isbn := ""
+		for _, id := range vi.IDs {
+			if id.Type != "ISBN_13" && id.Type != "ISBN_10" {
+				continue
+			}
+			isbns = append(isbns, id.Identifier)
+			if isbn == "" || id.Type == "ISBN_13" {
+				isbn = id.Identifier
+			}
+		}
+		cands = append(cands, Candidate{
+			Title: vi.Title, Lang: vi.Language, Authors: vi.Authors,
+			ISBN: isbn, Publisher: vi.Publisher,
+			Taiwan: IsTaiwanEdition(vi.Publisher, isbns...),
+		})
 	}
 	return cands, nil
 }

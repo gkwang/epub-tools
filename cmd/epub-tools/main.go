@@ -93,7 +93,7 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 
 	var norm lookup.Normalizer
 	if *useLookup {
-		norm = lookup.New()
+		norm = lookup.New(lookup.Options{PreferTaiwan: script == zh.Traditional})
 	}
 	resolve := func(path string) (string, string, error) {
 		md, err := epub.Read(path)
@@ -115,6 +115,9 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "warning: %s: %s\n", path, res.Warn)
 		}
 		note := "matched: " + res.Source
+		if res.Edition != "" {
+			note += " (" + res.Edition + " edition)"
+		}
 		if res.Source == "" || res.Source == "embedded" {
 			note = "embedded"
 		}

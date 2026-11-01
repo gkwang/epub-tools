@@ -13,6 +13,9 @@ type Result struct {
 	Title  string // final title to use (embedded title if no match)
 	Source string // "bangumi", "google", "openlibrary", or "embedded"
 	Warn   string // non-fatal problem (network error, 429), empty if none
+	// Edition is "taiwan" when the accepted candidate is a Taiwan edition,
+	// otherwise "".
+	Edition string
 }
 
 // Normalizer resolves a book's canonical title. Implementations must never
