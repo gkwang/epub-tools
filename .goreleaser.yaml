@@ -1,0 +1,78 @@
+# GoReleaser v2 config. Release: push a vX.Y.Z tag (see RELEASING.md).
+# Local dry run: goreleaser release --snapshot --clean
+version: 2
+
+project_name: epub-tools
+
+before:
+  hooks:
+    - go mod tidy -diff
+    - go test ./...
+
+builds:
+  - id: epub-tools
+    main: ./cmd/epub-tools
+    binary: epub-tools
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .FullCommit }}
+      - -X main.date={{ .CommitDate }}
+    # Reproducible: timestamps come from the commit, not the build machine.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    ids: [epub-tools]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: git
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+release:
+  github:
+    owner: gkwang
+    name: epub-tools
+  draft: false
+  prerelease: auto
+  footer: |
+    **Install / upgrade (macOS, Linux):**
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/gkwang/epub-tools/main/install.sh | sh
+    ```
+    Verify a download: `gh attestation verify <archive> --repo gkwang/epub-tools`
