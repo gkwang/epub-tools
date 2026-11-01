@@ -99,6 +99,27 @@ func decodeXML(f *zip.File, v any, strict bool) error {
 	return d.Decode(v)
 }
 
+// locateOPF finds the package document: the container.xml rootfile if it
+// resolves, else the first *.opf entry.
+func locateOPF(all []*zip.File, files map[string]*zip.File) *zip.File {
+	if cf := files["META-INF/container.xml"]; cf != nil {
+		var c xmlContainer
+		if decodeXML(cf, &c, true) == nil {
+			for _, rf := range c.Rootfiles {
+				if f := files[strings.TrimPrefix(rf.FullPath, "/")]; f != nil && rf.FullPath != "" {
+					return f
+				}
+			}
+		}
+	}
+	for _, f := range all {
+		if strings.HasSuffix(strings.ToLower(f.Name), ".opf") && !f.FileInfo().IsDir() {
+			return f
+		}
+	}
+	return nil
+}
+
 // Read extracts metadata from the EPUB at path. It errors only if the file is
 // not a readable zip or no OPF can be found/parsed; otherwise it returns
 // whatever could be recovered (Title may be "").
@@ -115,26 +136,7 @@ func Read(epubPath string) (Metadata, error) {
 		files[f.Name] = f
 	}
 
-	var opf *zip.File
-	if cf := files["META-INF/container.xml"]; cf != nil {
-		var c xmlContainer
-		if decodeXML(cf, &c, true) == nil {
-			for _, rf := range c.Rootfiles {
-				if f := files[strings.TrimPrefix(rf.FullPath, "/")]; f != nil && rf.FullPath != "" {
-					opf = f
-					break
-				}
-			}
-		}
-	}
-	if opf == nil {
-		for _, f := range zr.File {
-			if strings.HasSuffix(strings.ToLower(f.Name), ".opf") && !f.FileInfo().IsDir() {
-				opf = f
-				break
-			}
-		}
-	}
+	opf := locateOPF(zr.File, files)
 	if opf == nil {
 		return md, errors.New("no OPF found in epub")
 	}
